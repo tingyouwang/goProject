@@ -29,6 +29,7 @@ func NewHandler(repo Repository) *Handler {
 func (h *Handler) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /tasks", h.create)
+	mux.HandleFunc("POST /tasks/batch", h.batchCreate)
 	mux.HandleFunc("GET /tasks", h.list)
 	mux.HandleFunc("GET /tasks/{id}", h.get)
 	mux.HandleFunc("PUT /tasks/{id}", h.update)
@@ -56,6 +57,38 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 	t := h.repo.Create(in.Title)
 	writeJSON(w, http.StatusCreated, t)
+}
+
+// batchInput 是批次建立的請求本體:一組標題。
+type batchInput struct {
+	Titles []string `json:"titles"`
+}
+
+// defaultBatchWorkers 是批次處理的併發度(同時最多幾個 worker)。
+const defaultBatchWorkers = 4
+
+// batchCreate 併發建立一批 task,回報每一筆的成敗。
+//
+// 這個端點是整個專案的併發亮點:它把請求交給 ProcessBatch,
+// 由一個有界 worker pool 併發處理,並用 r.Context() 傳遞逾時/取消。
+// r.Context() 會在「客戶端斷線」或「伺服器 WriteTimeout 到」時自動取消——
+// 免費得到「客戶端都走了就別再白做工」的行為。
+func (h *Handler) batchCreate(w http.ResponseWriter, r *http.Request) {
+	var in batchInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if len(in.Titles) == 0 {
+		writeError(w, http.StatusBadRequest, "titles must not be empty")
+		return
+	}
+
+	results := ProcessBatch(r.Context(), h.repo, in.Titles, defaultBatchWorkers)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"count":   len(results),
+		"results": results,
+	})
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {

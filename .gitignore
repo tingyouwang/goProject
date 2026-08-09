@@ -1,0 +1,15 @@
+# 編譯產物
+/taskapi
+*.exe
+*.test
+*.out
+
+# Go 相關
+/vendor/
+go.work
+go.work.sum
+
+# 編輯器 / 系統
+.idea/
+.vscode/
+.DS_Store
